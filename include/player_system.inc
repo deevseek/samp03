@@ -16,6 +16,11 @@ enum E_PLAYER_DATA
     bool:PlayerConnected,
     PlayerId,
     PlayerName[MAX_PLAYER_NAME + 1],
+    AccountID,
+    bool:AccountLoggedIn,
+    AccountAdminLevel,
+    AccountUsername[MAX_PLAYER_NAME + 1],
+    PlayerCharacterName[MAX_PLAYER_NAME + 1],
     bool:PlayerHasCharacter,
     PlayerAdminLevel,
     PlayerMoney,
@@ -47,6 +52,11 @@ stock Player_ResetState(playerid)
     PlayerData[playerid][PlayerConnected] = false;
     PlayerData[playerid][PlayerId] = INVALID_PLAYER_ID;
     PlayerData[playerid][PlayerName][0] = EOS;
+    PlayerData[playerid][AccountID] = 0;
+    PlayerData[playerid][AccountLoggedIn] = false;
+    PlayerData[playerid][AccountAdminLevel] = 0;
+    PlayerData[playerid][AccountUsername][0] = EOS;
+    PlayerData[playerid][PlayerCharacterName][0] = EOS;
     PlayerData[playerid][PlayerHasCharacter] = false;
     PlayerData[playerid][PlayerAdminLevel] = 0;
     PlayerData[playerid][PlayerMoney] = 0;
