@@ -11,6 +11,7 @@
 #include "../include/gl_common.inc"
 #include "../include/gl_spawns.inc"
 #include "../include/player_system.inc"
+#include "../include/character_system.inc"
 
 #pragma tabsize 0
 
@@ -59,6 +60,17 @@ public OnPlayerConnect(playerid)
 	}
 
 	SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Selamat datang di server.");
+	if (!Character_Load(playerid))
+	{
+		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Character tidak dapat dimuat. Silakan hubungi admin.");
+		Kick(playerid);
+		return 0;
+	}
+
+	if (PlayerData[playerid][PlayerHasCharacter])
+	{
+		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Character aktif telah dimuat.");
+	}
 	format(message, sizeof(message), "Player ID: %d", PlayerData[playerid][PlayerId]);
 	SendClientMessage(playerid, COLOR_SERVER_MESSAGE, message);
 	printf("Player connected: %s (%d). Online: %d", PlayerData[playerid][PlayerName], playerid, Player_GetOnlineCount());
@@ -70,6 +82,11 @@ public OnPlayerConnect(playerid)
 public OnPlayerDisconnect(playerid, reason)
 {
 	printf("Player disconnected: %s (%d)", PlayerData[playerid][PlayerName], playerid);
+	if (Player_IsOnline(playerid) && PlayerData[playerid][PlayerHasCharacter])
+	{
+		Character_Save(playerid);
+	}
+	Character_Reset(playerid);
 	Player_ResetState(playerid);
 	return 1;
 }
@@ -84,13 +101,29 @@ public OnPlayerCommandText(playerid, cmdtext[])
 
 	if (strcmp(cmdtext, "/help", true) == 0)
 	{
-		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Command tersedia: /help, /id");
+		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Command tersedia: /help, /id, /charinfo");
 		return 1;
 	}
 
 	if (strcmp(cmdtext, "/id", true) == 0)
 	{
 		format(message, sizeof(message), "Player ID Anda: %d", PlayerData[playerid][PlayerId]);
+		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, message);
+		return 1;
+	}
+
+	if (strcmp(cmdtext, "/charinfo", true) == 0)
+	{
+		if (!PlayerData[playerid][PlayerHasCharacter])
+		{
+			SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Character belum aktif.");
+			return 1;
+		}
+
+		Character_CaptureRuntime(playerid);
+		format(message, sizeof(message), "Character ID: %d | Name: %s", PlayerCharacterId[playerid], PlayerData[playerid][PlayerName]);
+		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, message);
+		format(message, sizeof(message), "Money: %d | Skin: %d | Health: %.1f | Armour: %.1f", PlayerData[playerid][PlayerMoney], PlayerData[playerid][PlayerSkin], PlayerData[playerid][PlayerHealth], PlayerData[playerid][PlayerArmour]);
 		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, message);
 		return 1;
 	}
@@ -294,6 +327,7 @@ public OnPlayerRequestClass(playerid, classid)
 
 public OnGameModeInit()
 {
+	Character_InitializeDatabase();
 	SetGameModeText("SA-MP Roleplay Core");
 	ShowPlayerMarkers(PLAYER_MARKERS_MODE_GLOBAL);
 	ShowNameTags(1);
@@ -389,8 +423,11 @@ public OnGameModeExit()
 {
 	for (new playerid = 0; playerid < MAX_PLAYERS; playerid++)
 	{
+		if (Player_IsOnline(playerid) && PlayerData[playerid][PlayerHasCharacter]) Character_Save(playerid);
+		Character_Reset(playerid);
 		Player_ResetState(playerid);
 	}
+	Character_CloseDatabase();
 	return 1;
 }
 
