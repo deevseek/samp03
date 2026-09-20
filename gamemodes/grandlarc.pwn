@@ -12,6 +12,7 @@
 #include "../include/gl_spawns.inc"
 #include "../include/player_system.inc"
 #include "../include/character_system.inc"
+#include "../include/account_system.inc"
 
 #pragma tabsize 0
 
@@ -60,17 +61,8 @@ public OnPlayerConnect(playerid)
 	}
 
 	SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Selamat datang di server.");
-	if (!Character_Load(playerid))
-	{
-		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Character tidak dapat dimuat. Silakan hubungi admin.");
-		Kick(playerid);
-		return 0;
-	}
-
-	if (PlayerData[playerid][PlayerHasCharacter])
-	{
-		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Character aktif telah dimuat.");
-	}
+	TogglePlayerSpectating(playerid, true);
+	Account_ShowUsernameDialog(playerid);
 	format(message, sizeof(message), "Player ID: %d", PlayerData[playerid][PlayerId]);
 	SendClientMessage(playerid, COLOR_SERVER_MESSAGE, message);
 	printf("Player connected: %s (%d). Online: %d", PlayerData[playerid][PlayerName], playerid, Player_GetOnlineCount());
@@ -82,11 +74,12 @@ public OnPlayerConnect(playerid)
 public OnPlayerDisconnect(playerid, reason)
 {
 	printf("Player disconnected: %s (%d)", PlayerData[playerid][PlayerName], playerid);
-	if (Player_IsOnline(playerid) && PlayerData[playerid][PlayerHasCharacter])
+	if (Player_IsOnline(playerid) && PlayerData[playerid][AccountLoggedIn] && PlayerData[playerid][PlayerHasCharacter])
 	{
 		Character_Save(playerid);
 	}
 	Character_Reset(playerid);
+	Account_Reset(playerid);
 	Player_ResetState(playerid);
 	return 1;
 }
@@ -101,7 +94,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
 
 	if (strcmp(cmdtext, "/help", true) == 0)
 	{
-		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Command tersedia: /help, /id, /charinfo");
+		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Command tersedia: /help, /id, /account, /charinfo");
 		return 1;
 	}
 
@@ -121,9 +114,18 @@ public OnPlayerCommandText(playerid, cmdtext[])
 		}
 
 		Character_CaptureRuntime(playerid);
-		format(message, sizeof(message), "Character ID: %d | Name: %s", PlayerCharacterId[playerid], PlayerData[playerid][PlayerName]);
+		format(message, sizeof(message), "Character ID: %d | Name: %s", PlayerCharacterId[playerid], PlayerData[playerid][PlayerCharacterName]);
 		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, message);
 		format(message, sizeof(message), "Money: %d | Skin: %d | Health: %.1f | Armour: %.1f", PlayerData[playerid][PlayerMoney], PlayerData[playerid][PlayerSkin], PlayerData[playerid][PlayerHealth], PlayerData[playerid][PlayerArmour]);
+		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, message);
+		return 1;
+	}
+
+	if (strcmp(cmdtext, "/account", true) == 0)
+	{
+		format(message, sizeof(message), "Account ID: %d | Username: %s", PlayerData[playerid][AccountID], PlayerData[playerid][AccountUsername]);
+		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, message);
+		format(message, sizeof(message), "Login: %s | Admin level: %d | Character ID: %d", PlayerData[playerid][AccountLoggedIn] ? ("ya") : ("tidak"), PlayerData[playerid][AccountAdminLevel], PlayerCharacterId[playerid]);
 		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, message);
 		return 1;
 	}
@@ -136,7 +138,44 @@ public OnPlayerCommandText(playerid, cmdtext[])
 public OnPlayerSpawn(playerid)
 {
 	if (IsPlayerNPC(playerid)) return 1;
+	if (!Player_IsOnline(playerid) || !PlayerData[playerid][AccountLoggedIn]) return 0;
 	return Player_ApplySpawn(playerid);
+}
+
+//----------------------------------------------------------
+
+public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
+{
+	#pragma unused listitem
+	if (!Player_IsOnline(playerid) || PlayerData[playerid][AccountLoggedIn]) return 0;
+	if (!response) { Kick(playerid); return 1; }
+
+	switch (dialogid)
+	{
+		case DIALOG_ACCOUNT_USERNAME:
+		{
+			if (!Account_IsUsernameValid(inputtext)) { SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Username harus 3-24 karakter: huruf, angka, atau underscore."); Account_ShowUsernameDialog(playerid); return 1; }
+			Account_CheckUsername(playerid, inputtext);
+		}
+		case DIALOG_ACCOUNT_LOGIN:
+		{
+			if (!Account_IsPasswordValid(inputtext)) { SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Password minimal 6 dan maksimal 64 karakter."); ShowPlayerDialog(playerid, DIALOG_ACCOUNT_LOGIN, DIALOG_STYLE_PASSWORD, "Login", "Masukkan password account.", "Login", "Keluar"); return 1; }
+			Account_Login(playerid, inputtext);
+		}
+		case DIALOG_ACCOUNT_REGISTER:
+		{
+			if (!Account_IsPasswordValid(inputtext)) { SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Password minimal 6 dan maksimal 64 karakter."); ShowPlayerDialog(playerid, DIALOG_ACCOUNT_REGISTER, DIALOG_STYLE_PASSWORD, "Registrasi", "Buat password account.", "Daftar", "Keluar"); return 1; }
+			format(AccountPendingPassword[playerid], sizeof(AccountPendingPassword[]), "%s", inputtext);
+			ShowPlayerDialog(playerid, DIALOG_ACCOUNT_CONFIRM, DIALOG_STYLE_PASSWORD, "Konfirmasi password", "Masukkan ulang password Anda.", "Konfirmasi", "Keluar");
+		}
+		case DIALOG_ACCOUNT_CONFIRM:
+		{
+			if (strcmp(inputtext, AccountPendingPassword[playerid], false) != 0) { AccountPendingPassword[playerid][0] = EOS; SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Konfirmasi password tidak cocok."); ShowPlayerDialog(playerid, DIALOG_ACCOUNT_REGISTER, DIALOG_STYLE_PASSWORD, "Registrasi", "Buat password account.", "Daftar", "Keluar"); return 1; }
+			Account_Register(playerid, inputtext);
+			AccountPendingPassword[playerid][0] = EOS;
+		}
+	}
+	return 1;
 }
 
 //----------------------------------------------------------
@@ -327,7 +366,11 @@ public OnPlayerRequestClass(playerid, classid)
 
 public OnGameModeInit()
 {
-	Character_InitializeDatabase();
+	if (!Character_InitializeDatabase() || !Account_InitializeDatabase())
+	{
+		printf("[Account] Database startup failed; stopping gamemode initialization.");
+		return 0;
+	}
 	SetGameModeText("SA-MP Roleplay Core");
 	ShowPlayerMarkers(PLAYER_MARKERS_MODE_GLOBAL);
 	ShowNameTags(1);
@@ -423,8 +466,9 @@ public OnGameModeExit()
 {
 	for (new playerid = 0; playerid < MAX_PLAYERS; playerid++)
 	{
-		if (Player_IsOnline(playerid) && PlayerData[playerid][PlayerHasCharacter]) Character_Save(playerid);
+		if (Player_IsOnline(playerid) && PlayerData[playerid][AccountLoggedIn] && PlayerData[playerid][PlayerHasCharacter]) Character_Save(playerid);
 		Character_Reset(playerid);
+		Account_Reset(playerid);
 		Player_ResetState(playerid);
 	}
 	Character_CloseDatabase();
