@@ -1,7 +1,7 @@
 //----------------------------------------------------------
 //
-//  GRAND LARCENY  1.0
-//  A freeroam gamemode for SA-MP 0.3
+//  SA-MP ROLEPLAY CORE
+//  Core server and runtime player foundation for SA-MP 0.3
 //
 //----------------------------------------------------------
 
@@ -10,6 +10,7 @@
 #include <float>
 #include "../include/gl_common.inc"
 #include "../include/gl_spawns.inc"
+#include "../include/player_system.inc"
 
 #pragma tabsize 0
 
@@ -17,6 +18,7 @@
 
 #define COLOR_WHITE 		0xFFFFFFFF
 #define COLOR_NORMAL_PLAYER 0xFF4444FF
+#define COLOR_SERVER_MESSAGE 0x6EC1E4FF
 
 #define CITY_LOS_SANTOS 	0
 #define CITY_SAN_FIERRO 	1
@@ -47,98 +49,68 @@ main()
 
 public OnPlayerConnect(playerid)
 {
-	GameTextForPlayer(playerid,"~w~Grand Larceny",3000,4);
-  	SendClientMessage(playerid,COLOR_WHITE,"Welcome to Grand Larceny");
-  	
-  	// class selection init vars
-  	gPlayerCitySelection[playerid] = -1;
-	gPlayerHasCitySelected[playerid] = 0;
-	gPlayerLastCitySelectionTick[playerid] = GetTickCount();
+	new message[64];
 
-	//SetPlayerColor(playerid,COLOR_NORMAL_PLAYER);
-	
+	if (!Player_Initialize(playerid))
+	{
+		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Nama player tidak valid.");
+		Kick(playerid);
+		return 0;
+	}
+
+	SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Selamat datang di server.");
+	format(message, sizeof(message), "Player ID: %d", PlayerData[playerid][PlayerId]);
+	SendClientMessage(playerid, COLOR_SERVER_MESSAGE, message);
+	printf("Player connected: %s (%d). Online: %d", PlayerData[playerid][PlayerName], playerid, Player_GetOnlineCount());
 	return 1;
+}
+
+//----------------------------------------------------------
+
+public OnPlayerDisconnect(playerid, reason)
+{
+	printf("Player disconnected: %s (%d)", PlayerData[playerid][PlayerName], playerid);
+	Player_ResetState(playerid);
+	return 1;
+}
+
+//----------------------------------------------------------
+
+public OnPlayerCommandText(playerid, cmdtext[])
+{
+	new message[64];
+
+	if (!Player_IsOnline(playerid)) return 0;
+
+	if (strcmp(cmdtext, "/help", true) == 0)
+	{
+		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Command tersedia: /help, /id");
+		return 1;
+	}
+
+	if (strcmp(cmdtext, "/id", true) == 0)
+	{
+		format(message, sizeof(message), "Player ID Anda: %d", PlayerData[playerid][PlayerId]);
+		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, message);
+		return 1;
+	}
+
+	return 0;
 }
 
 //----------------------------------------------------------
 
 public OnPlayerSpawn(playerid)
 {
-	if(IsPlayerNPC(playerid)) return 1;
-	
-	new randSpawn = 0;
-	
-	SetPlayerInterior(playerid,0);
-	TogglePlayerClock(playerid,0);
- 	ResetPlayerMoney(playerid);
-	GivePlayerMoney(playerid, 30000);
-	
-	// if they ever return to class selection make them city
-	// select again first
-	gPlayerHasCitySelected[playerid] = 0;
-
-	if(CITY_LOS_SANTOS == gPlayerCitySelection[playerid]) {
- 	    randSpawn = random(sizeof(gRandomSpawns_LosSantos));
- 	    SetPlayerPos(playerid,
-		 gRandomSpawns_LosSantos[randSpawn][0],
-		 gRandomSpawns_LosSantos[randSpawn][1],
-		 gRandomSpawns_LosSantos[randSpawn][2]);
-		SetPlayerFacingAngle(playerid,gRandomSpawns_LosSantos[randSpawn][3]);
-	}
-	else if(CITY_SAN_FIERRO == gPlayerCitySelection[playerid]) {
- 	    randSpawn = random(sizeof(gRandomSpawns_SanFierro));
- 	    SetPlayerPos(playerid,
-		 gRandomSpawns_SanFierro[randSpawn][0],
-		 gRandomSpawns_SanFierro[randSpawn][1],
-		 gRandomSpawns_SanFierro[randSpawn][2]);
-		SetPlayerFacingAngle(playerid,gRandomSpawns_SanFierro[randSpawn][3]);
-	}
-	else if(CITY_LAS_VENTURAS == gPlayerCitySelection[playerid]) {
- 	    randSpawn = random(sizeof(gRandomSpawns_LasVenturas));
- 	    SetPlayerPos(playerid,
-		 gRandomSpawns_LasVenturas[randSpawn][0],
-		 gRandomSpawns_LasVenturas[randSpawn][1],
-		 gRandomSpawns_LasVenturas[randSpawn][2]);
-		SetPlayerFacingAngle(playerid,gRandomSpawns_LasVenturas[randSpawn][3]);
-	}
-
-	//SetPlayerColor(playerid,COLOR_NORMAL_PLAYER);
-	
-	SetPlayerSkillLevel(playerid,WEAPONSKILL_PISTOL,200);
-    SetPlayerSkillLevel(playerid,WEAPONSKILL_PISTOL_SILENCED,200);
-    SetPlayerSkillLevel(playerid,WEAPONSKILL_DESERT_EAGLE,200);
-    SetPlayerSkillLevel(playerid,WEAPONSKILL_SHOTGUN,200);
-    SetPlayerSkillLevel(playerid,WEAPONSKILL_SAWNOFF_SHOTGUN,200);
-    SetPlayerSkillLevel(playerid,WEAPONSKILL_SPAS12_SHOTGUN,200);
-    SetPlayerSkillLevel(playerid,WEAPONSKILL_MICRO_UZI,200);
-    SetPlayerSkillLevel(playerid,WEAPONSKILL_MP5,200);
-    SetPlayerSkillLevel(playerid,WEAPONSKILL_AK47,200);
-    SetPlayerSkillLevel(playerid,WEAPONSKILL_M4,200);
-    SetPlayerSkillLevel(playerid,WEAPONSKILL_SNIPERRIFLE,200);
-    
-    GivePlayerWeapon(playerid,WEAPON_COLT45,100);
-	//GivePlayerWeapon(playerid,WEAPON_MP5,100);
-	//TogglePlayerClock(playerid, 1);
-
-	return 1;
+	if (IsPlayerNPC(playerid)) return 1;
+	return Player_ApplySpawn(playerid);
 }
 
 //----------------------------------------------------------
 
 public OnPlayerDeath(playerid, killerid, reason)
 {
-    new playercash;
-    
-	if(killerid == INVALID_PLAYER_ID) {
-        ResetPlayerMoney(playerid);
-	} else {
-		playercash = GetPlayerMoney(playerid);
-		if(playercash > 0)  {
-			GivePlayerMoney(killerid, playercash);
-			ResetPlayerMoney(playerid);
-		}
-	}
-   	return 1;
+	return Player_ResetRuntimeAfterDeath(playerid);
 }
 
 //----------------------------------------------------------
@@ -309,27 +281,20 @@ ClassSel_HandleCitySelection(playerid)
 
 public OnPlayerRequestClass(playerid, classid)
 {
-	if(IsPlayerNPC(playerid)) return 1;
+	if (IsPlayerNPC(playerid)) return 1;
 
-	if(gPlayerHasCitySelected[playerid]) {
-		ClassSel_SetupCharSelection(playerid);
-		return 1;
-	} else {
-		if(GetPlayerState(playerid) != PLAYER_STATE_SPECTATING) {
-			TogglePlayerSpectating(playerid,1);
-    		TextDrawShowForPlayer(playerid, txtClassSelHelper);
-    		gPlayerCitySelection[playerid] = -1;
-		}
-  	}
-    
-	return 0;
+	SetPlayerPos(playerid, PLAYER_SPAWN_X, PLAYER_SPAWN_Y, PLAYER_SPAWN_Z);
+	SetPlayerFacingAngle(playerid, PLAYER_SPAWN_ANGLE);
+	SetPlayerCameraPos(playerid, PLAYER_SPAWN_X - 8.0, PLAYER_SPAWN_Y - 8.0, PLAYER_SPAWN_Z + 4.0);
+	SetPlayerCameraLookAt(playerid, PLAYER_SPAWN_X, PLAYER_SPAWN_Y, PLAYER_SPAWN_Z);
+	return 1;
 }
 
 //----------------------------------------------------------
 
 public OnGameModeInit()
 {
-	SetGameModeText("Grand Larceny");
+	SetGameModeText("SA-MP Roleplay Core");
 	ShowPlayerMarkers(PLAYER_MARKERS_MODE_GLOBAL);
 	ShowNameTags(1);
 	SetNameTagDrawDistance(40.0);
@@ -339,10 +304,8 @@ public OnGameModeInit()
 	
 	//LimitGlobalChatRadius(300.0);
 	
-	ClassSel_InitTextDraws();
-
 	// Player Class
-	AddPlayerClass(1,1759.0189,-1898.1260,13.5622,266.4503,-1,-1,-1,-1,-1,-1);
+	AddPlayerClass(PLAYER_DEFAULT_SKIN, PLAYER_SPAWN_X, PLAYER_SPAWN_Y, PLAYER_SPAWN_Z, PLAYER_SPAWN_ANGLE, -1, -1, -1, -1, -1, -1);
 	AddPlayerClass(2,1759.0189,-1898.1260,13.5622,266.4503,-1,-1,-1,-1,-1,-1);
  	AddPlayerClass(269,1759.0189,-1898.1260,13.5622,266.4503,-1,-1,-1,-1,-1,-1);
 	AddPlayerClass(270,1759.0189,-1898.1260,13.5622,266.4503,-1,-1,-1,-1,-1,-1);
@@ -422,16 +385,20 @@ public OnGameModeInit()
 
 //----------------------------------------------------------
 
+public OnGameModeExit()
+{
+	for (new playerid = 0; playerid < MAX_PLAYERS; playerid++)
+	{
+		Player_ResetState(playerid);
+	}
+	return 1;
+}
+
+//----------------------------------------------------------
+
 public OnPlayerUpdate(playerid)
 {
-	if(!IsPlayerConnected(playerid)) return 0;
-	
-	// changing cities by inputs
-	if( !gPlayerHasCitySelected[playerid] &&
-	    GetPlayerState(playerid) == PLAYER_STATE_SPECTATING ) {
-	    ClassSel_HandleCitySelection(playerid);
-	    return 1;
-	}
+	if (!Player_IsOnline(playerid)) return 0;
 	
 	// No weapons in interiors
 	if(GetPlayerInterior(playerid) != 0 && GetPlayerWeapon(playerid) != 0) {
