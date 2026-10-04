@@ -24,7 +24,11 @@ stock Account_Reset(playerid)
 
 stock bool:Account_IsUsernameValid(const username[])
 {
-    return Character_IsNameValid(username);
+    new length = strlen(username);
+    if (length < 3 || length > MAX_PLAYER_NAME) return false;
+    for (new index = 0; index < length; index++)
+        if (!((username[index] >= 'A' && username[index] <= 'Z') || (username[index] >= 'a' && username[index] <= 'z') || (username[index] >= '0' && username[index] <= '9') || username[index] == '_')) return false;
+    return true;
 }
 
 stock bool:Account_IsPasswordValid(const password[])
@@ -35,7 +39,8 @@ stock bool:Account_IsPasswordValid(const password[])
 
 stock Account_ShowUsernameDialog(playerid)
 {
-    ShowPlayerDialog(playerid, DIALOG_ACCOUNT_USERNAME, DIALOG_STYLE_INPUT, "Account", "Masukkan username account Anda.", "Lanjut", "Keluar");
+    PlayerOnboardingState[playerid] = ONBOARDING_ACCOUNT;
+    ShowPlayerDialog(playerid, DIALOG_ACCOUNT_USERNAME, DIALOG_STYLE_INPUT, "LOS SANTOS ROLEPLAY | REGISTRASI / LOGIN ACCOUNT", "Masukkan username account Anda.\n\nUsername digunakan untuk login server.\nUsername BUKAN nama character Anda.", "Lanjut", "Keluar");
     return 1;
 }
 
@@ -59,17 +64,18 @@ stock bool:Account_VerifyPassword(const password[], const username[], const stor
 
 stock Account_Authenticate(playerid, accountId, adminLevel, const username[])
 {
-    new query[128], DBResult:result;
+    new query[128], DBResult:result, E_CHARACTER_LOAD_RESULT:loadResult;
     if (!Player_IsOnline(playerid)) return 0;
     PlayerData[playerid][AccountID] = accountId;
     PlayerData[playerid][AccountLoggedIn] = true;
     PlayerData[playerid][AccountAdminLevel] = adminLevel;
     format(PlayerData[playerid][AccountUsername], MAX_PLAYER_NAME + 1, "%s", username);
     PlayerData[playerid][PlayerAdminLevel] = adminLevel;
-    if (!Character_Load(playerid))
+    loadResult = Character_Load(playerid);
+    if (loadResult == CHARACTER_LOAD_ERROR)
     {
         printf("[Account] Character load failure for account ID %d.", accountId);
-        SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Character tidak dapat dimuat. Silakan hubungi admin.");
+        SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Database character sedang bermasalah. Silakan coba lagi.");
         Character_Reset(playerid);
         PlayerData[playerid][AccountID] = 0;
         PlayerData[playerid][AccountLoggedIn] = false;
@@ -81,7 +87,30 @@ stock Account_Authenticate(playerid, accountId, adminLevel, const username[])
     format(query, sizeof(query), "UPDATE accounts SET last_login = CURRENT_TIMESTAMP WHERE id = %d", accountId);
     result = db_query(CharacterDatabase, query);
     if (_:result != 0) db_free_result(result);
-    SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Login berhasil. Character aktif telah dimuat.");
+    if (loadResult == CHARACTER_LOAD_NOT_FOUND)
+    {
+        SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Login berhasil. Silakan selesaikan pendaftaran warga Los Santos.");
+        CharacterCreation_ShowIntro(playerid);
+        return 1;
+    }
+    if (!Inventory_Load(playerid))
+    {
+        printf("[Account] Inventory load failure for character ID %d.", PlayerCharacterId[playerid]);
+        SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Inventory character sedang bermasalah. Silakan coba lagi.");
+        return 0;
+    }
+    // Only characters created by the new wizard can recover an interrupted starter grant.
+    if (!PlayerCharacterStarterClaimed[playerid] && PlayerCharacterCreationVersion[playerid] == 1)
+    {
+        if (!Inventory_SetCash(playerid, STARTER_CASH_AMOUNT)) { printf("[Account] Starter recovery failed for character %d.", PlayerCharacterId[playerid]); return 0; }
+        format(query, sizeof(query), "UPDATE characters SET starter_pack_claimed=1,money=%d WHERE character_id=%d AND starter_pack_claimed=0", STARTER_CASH_AMOUNT, PlayerCharacterId[playerid]);
+        result = db_query(CharacterDatabase, query);
+        if (_:result == 0) { printf("[Account] Starter recovery flag failed for character %d.", PlayerCharacterId[playerid]); return 0; }
+        db_free_result(result);
+        PlayerCharacterStarterClaimed[playerid] = 1;
+    }
+    PlayerOnboardingState[playerid] = ONBOARDING_COMPLETE;
+    SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Login berhasil. Character aktif dan inventory telah dimuat.");
     TogglePlayerSpectating(playerid, false);
     SpawnPlayer(playerid);
     return 1;
@@ -98,11 +127,11 @@ stock Account_CheckUsername(playerid, const username[])
     if (db_num_rows(result) > 0)
     {
         db_free_result(result);
-        ShowPlayerDialog(playerid, DIALOG_ACCOUNT_LOGIN, DIALOG_STYLE_PASSWORD, "Login", "Masukkan password account.", "Login", "Keluar");
+        ShowPlayerDialog(playerid, DIALOG_ACCOUNT_LOGIN, DIALOG_STYLE_PASSWORD, "LOS SANTOS ROLEPLAY | LOGIN ACCOUNT", "Masukkan password account.\n\nData ini adalah identitas OOC untuk login, bukan identitas character.", "Login", "Keluar");
         return 1;
     }
     db_free_result(result);
-    ShowPlayerDialog(playerid, DIALOG_ACCOUNT_REGISTER, DIALOG_STYLE_PASSWORD, "Registrasi", "Account belum ditemukan. Silakan buat password (minimal 6 karakter).", "Daftar", "Keluar");
+    ShowPlayerDialog(playerid, DIALOG_ACCOUNT_REGISTER, DIALOG_STYLE_PASSWORD, "LOS SANTOS ROLEPLAY | REGISTRASI ACCOUNT", "Account belum ditemukan. Buat password minimal 6 karakter.\n\nUsername adalah identitas login OOC dan BUKAN nama character.", "Daftar", "Keluar");
     return 1;
 }
 
