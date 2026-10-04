@@ -97,8 +97,6 @@ stock Player_ApplySpawn(playerid)
     SetPlayerFacingAngle(playerid, PlayerData[playerid][PlayerSpawnAngle]);
     SetPlayerHealth(playerid, PlayerData[playerid][PlayerHealth]);
     SetPlayerArmour(playerid, PlayerData[playerid][PlayerArmour]);
-    ResetPlayerMoney(playerid);
-    GivePlayerMoney(playerid, PlayerData[playerid][PlayerMoney]);
     return 1;
 }
 

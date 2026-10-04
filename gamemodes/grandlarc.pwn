@@ -12,7 +12,10 @@
 #include "../include/gl_spawns.inc"
 #include "../include/player_system.inc"
 #include "../include/character_system.inc"
+#include "../include/inventory_system.inc"
+#include "../include/character_creation.inc"
 #include "../include/account_system.inc"
+#include "../include/radial_menu.inc"
 #include "../include/city_system.inc"
 
 #pragma tabsize 0
@@ -52,7 +55,7 @@ main()
 
 public OnPlayerConnect(playerid)
 {
-	new message[64];
+	new message[160];
 
 	if (!Player_Initialize(playerid))
 	{
@@ -61,6 +64,8 @@ public OnPlayerConnect(playerid)
 		return 0;
 	}
 	City_ResetPlayer(playerid);
+	Inventory_Reset(playerid);
+	CharacterCreation_Reset(playerid);
 
 	SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Selamat datang di server.");
 	TogglePlayerSpectating(playerid, true);
@@ -78,9 +83,13 @@ public OnPlayerDisconnect(playerid, reason)
 	printf("Player disconnected: %s (%d)", PlayerData[playerid][PlayerName], playerid);
 	if (Player_IsOnline(playerid) && PlayerData[playerid][AccountLoggedIn] && PlayerData[playerid][PlayerHasCharacter])
 	{
+		Inventory_Save(playerid);
 		Character_Save(playerid);
 	}
+	Radial_Destroy(playerid);
 	City_ResetPlayer(playerid);
+	Inventory_Reset(playerid);
+	CharacterCreation_Reset(playerid);
 	Character_Reset(playerid);
 	Account_Reset(playerid);
 	Player_ResetState(playerid);
@@ -91,14 +100,20 @@ public OnPlayerDisconnect(playerid, reason)
 
 public OnPlayerCommandText(playerid, cmdtext[])
 {
-	new message[64];
+	new message[160];
 
 	if (!Player_IsOnline(playerid)) return 0;
+	if (strcmp(cmdtext, "/radial", true) == 0)
+	{
+		if (!Radial_CanUse(playerid)) SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Radial menu tersedia setelah login dan character aktif.");
+		else Radial_Toggle(playerid);
+		return 1;
+	}
 	if (City_HandleCommand(playerid, cmdtext)) return 1;
 
 	if (strcmp(cmdtext, "/help", true) == 0)
 	{
-		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Command: /help, /id, /account, /charinfo, /city, /gps, /gpsclear, /whereami");
+		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Command: /help, /id, /account, /charinfo, /city, /gps, /gpsclear, /whereami, /radial");
 		return 1;
 	}
 
@@ -111,6 +126,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
 
 	if (strcmp(cmdtext, "/charinfo", true) == 0)
 	{
+		new gender[24], birthplace[32], cash[32];
 		if (!PlayerData[playerid][PlayerHasCharacter])
 		{
 			SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Character belum aktif.");
@@ -118,9 +134,14 @@ public OnPlayerCommandText(playerid, cmdtext[])
 		}
 
 		Character_CaptureRuntime(playerid);
-		format(message, sizeof(message), "Character ID: %d | Name: %s", PlayerCharacterId[playerid], PlayerData[playerid][PlayerCharacterName]);
+		Character_GetGenderName(PlayerCharacterGender[playerid], gender, sizeof(gender));
+		Character_GetBirthplaceName(PlayerCharacterBirthplace[playerid], birthplace, sizeof(birthplace));
+		Inventory_FormatMoney(Inventory_GetCash(playerid), cash, sizeof(cash));
+		format(message, sizeof(message), "Character ID: %d | Nama: %s | Gender: %s", PlayerCharacterId[playerid], PlayerData[playerid][PlayerCharacterName], gender);
 		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, message);
-		format(message, sizeof(message), "Money: %d | Skin: %d | Health: %.1f | Armour: %.1f", PlayerData[playerid][PlayerMoney], PlayerData[playerid][PlayerSkin], PlayerData[playerid][PlayerHealth], PlayerData[playerid][PlayerArmour]);
+		format(message, sizeof(message), "TTL: %s, %02d/%02d/%04d | Umur: %d | Tinggi: %d cm", birthplace, PlayerCharacterBirthDay[playerid], PlayerCharacterBirthMonth[playerid], PlayerCharacterBirthYear[playerid], Character_GetAge(PlayerCharacterBirthDay[playerid], PlayerCharacterBirthMonth[playerid], PlayerCharacterBirthYear[playerid]), PlayerCharacterHeight[playerid]);
+		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, message);
+		format(message, sizeof(message), "Cash: %s | Skin: %d", cash, PlayerData[playerid][PlayerSkin]);
 		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, message);
 		return 1;
 	}
@@ -143,7 +164,10 @@ public OnPlayerSpawn(playerid)
 {
 	if (IsPlayerNPC(playerid)) return 1;
 	if (!Player_IsOnline(playerid) || !PlayerData[playerid][AccountLoggedIn]) return 0;
+	if (!PlayerData[playerid][PlayerHasCharacter] || PlayerOnboardingState[playerid] != ONBOARDING_COMPLETE || !InventoryLoaded[playerid]) return 0;
 	if (!Player_ApplySpawn(playerid)) return 0;
+	Inventory_SyncCash(playerid);
+	Radial_Close(playerid);
 	City_OnPlayerSpawn(playerid);
 	return 1;
 }
@@ -154,7 +178,14 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 {
 	if (!Player_IsOnline(playerid)) return 0;
 	if (City_HandleDialog(playerid, dialogid, response, listitem)) return 1;
+	if (Inventory_HandleDialog(playerid, dialogid)) return 1;
+	if (CharacterCreation_HandleDialog(playerid, dialogid, response, listitem, inputtext)) return 1;
 	if (PlayerData[playerid][AccountLoggedIn]) return 0;
+	if (dialogid >= DIALOG_ACCOUNT_USERNAME && dialogid <= DIALOG_ACCOUNT_CONFIRM && PlayerOnboardingState[playerid] != ONBOARDING_ACCOUNT)
+	{
+		Account_ShowUsernameDialog(playerid);
+		return 1;
+	}
 	if (!response) { Kick(playerid); return 1; }
 
 	switch (dialogid)
@@ -189,7 +220,26 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 
 public OnPlayerDeath(playerid, killerid, reason)
 {
+	Radial_Close(playerid);
 	return Player_ResetRuntimeAfterDeath(playerid);
+}
+
+public OnPlayerKeyStateChange(playerid, newkeys, oldkeys)
+{
+	if (Radial_HandleKey(playerid, newkeys, oldkeys)) return 1;
+	return 1;
+}
+
+public OnPlayerClickPlayerTextDraw(playerid, PlayerText:playertextid)
+{
+	if (Radial_HandleClick(playerid, playertextid)) return 1;
+	return 0;
+}
+
+public OnPlayerClickTextDraw(playerid, Text:clickedid)
+{
+	if (clickedid == Text:INVALID_TEXT_DRAW && RadialMenuOpen[playerid]) Radial_Close(playerid);
+	return 1;
 }
 
 //----------------------------------------------------------
@@ -373,7 +423,7 @@ public OnPlayerRequestClass(playerid, classid)
 
 public OnGameModeInit()
 {
-	if (!Character_InitializeDatabase() || !Account_InitializeDatabase())
+	if (!Character_InitializeDatabase() || !Account_InitializeDatabase() || !Inventory_InitializeDatabase())
 	{
 		printf("[Account] Database startup failed; stopping gamemode initialization.");
 		return 0;
@@ -454,8 +504,11 @@ public OnGameModeExit()
 {
 	for (new playerid = 0; playerid < MAX_PLAYERS; playerid++)
 	{
-		if (Player_IsOnline(playerid) && PlayerData[playerid][AccountLoggedIn] && PlayerData[playerid][PlayerHasCharacter]) Character_Save(playerid);
+		if (Player_IsOnline(playerid) && PlayerData[playerid][AccountLoggedIn] && PlayerData[playerid][PlayerHasCharacter]) { Inventory_Save(playerid); Character_Save(playerid); }
+		Radial_Destroy(playerid);
 		City_ResetPlayer(playerid);
+		Inventory_Reset(playerid);
+		CharacterCreation_Reset(playerid);
 		Character_Reset(playerid);
 		Account_Reset(playerid);
 		Player_ResetState(playerid);
