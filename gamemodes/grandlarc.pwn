@@ -13,6 +13,7 @@
 #include "../include/player_system.inc"
 #include "../include/character_system.inc"
 #include "../include/account_system.inc"
+#include "../include/city_system.inc"
 
 #pragma tabsize 0
 
@@ -59,6 +60,7 @@ public OnPlayerConnect(playerid)
 		Kick(playerid);
 		return 0;
 	}
+	City_ResetPlayer(playerid);
 
 	SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Selamat datang di server.");
 	TogglePlayerSpectating(playerid, true);
@@ -78,6 +80,7 @@ public OnPlayerDisconnect(playerid, reason)
 	{
 		Character_Save(playerid);
 	}
+	City_ResetPlayer(playerid);
 	Character_Reset(playerid);
 	Account_Reset(playerid);
 	Player_ResetState(playerid);
@@ -91,10 +94,11 @@ public OnPlayerCommandText(playerid, cmdtext[])
 	new message[64];
 
 	if (!Player_IsOnline(playerid)) return 0;
+	if (City_HandleCommand(playerid, cmdtext)) return 1;
 
 	if (strcmp(cmdtext, "/help", true) == 0)
 	{
-		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Command tersedia: /help, /id, /account, /charinfo");
+		SendClientMessage(playerid, COLOR_SERVER_MESSAGE, "Command: /help, /id, /account, /charinfo, /city, /gps, /gpsclear, /whereami");
 		return 1;
 	}
 
@@ -139,15 +143,18 @@ public OnPlayerSpawn(playerid)
 {
 	if (IsPlayerNPC(playerid)) return 1;
 	if (!Player_IsOnline(playerid) || !PlayerData[playerid][AccountLoggedIn]) return 0;
-	return Player_ApplySpawn(playerid);
+	if (!Player_ApplySpawn(playerid)) return 0;
+	City_OnPlayerSpawn(playerid);
+	return 1;
 }
 
 //----------------------------------------------------------
 
 public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 {
-	#pragma unused listitem
-	if (!Player_IsOnline(playerid) || PlayerData[playerid][AccountLoggedIn]) return 0;
+	if (!Player_IsOnline(playerid)) return 0;
+	if (City_HandleDialog(playerid, dialogid, response, listitem)) return 1;
+	if (PlayerData[playerid][AccountLoggedIn]) return 0;
 	if (!response) { Kick(playerid); return 1; }
 
 	switch (dialogid)
@@ -378,6 +385,7 @@ public OnGameModeInit()
 	EnableStuntBonusForAll(0);
 	DisableInteriorEnterExits();
 	SetWeather(2);
+	City_Initialize();
 	
 	//LimitGlobalChatRadius(300.0);
 	
@@ -428,33 +436,13 @@ public OnGameModeInit()
 	AddPlayerClass(98,1759.0189,-1898.1260,13.5622,266.4503,-1,-1,-1,-1,-1,-1);
 	AddPlayerClass(99,1759.0189,-1898.1260,13.5622,266.4503,-1,-1,-1,-1,-1,-1);
 
-	// SPECIAL
-	total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/trains.txt");
-	total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/pilots.txt");
-
-   	// LAS VENTURAS
-     total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/lv_law.txt");
-    total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/lv_airport.txt");
-    total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/lv_gen.txt");
-    
-    // SAN FIERRO
-    total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/sf_law.txt");
-    total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/sf_airport.txt");
-    total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/sf_gen.txt");
-    
-    // LOS SANTOS
+	// Los Santos is the only active roleplay city at this stage. Other vehicle
+	// files remain available for later city modules but are intentionally not loaded.
     total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/ls_law.txt");
     total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/ls_airport.txt");
     total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/ls_gen_inner.txt");
     total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/ls_gen_outer.txt");
     
-    // OTHER AREAS
-    total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/whetstone.txt");
-    total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/bone.txt");
-    total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/flint.txt");
-    total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/tierra.txt");
-    total_vehicles_from_files += LoadStaticVehiclesFromFile("vehicles/red_county.txt");
-
     printf("Total vehicles from files: %d",total_vehicles_from_files);
 
 	return 1;
@@ -467,12 +455,28 @@ public OnGameModeExit()
 	for (new playerid = 0; playerid < MAX_PLAYERS; playerid++)
 	{
 		if (Player_IsOnline(playerid) && PlayerData[playerid][AccountLoggedIn] && PlayerData[playerid][PlayerHasCharacter]) Character_Save(playerid);
+		City_ResetPlayer(playerid);
 		Character_Reset(playerid);
 		Account_Reset(playerid);
 		Player_ResetState(playerid);
 	}
+	City_Shutdown();
 	Character_CloseDatabase();
 	return 1;
+}
+
+//----------------------------------------------------------
+
+public OnPlayerEnterCheckpoint(playerid)
+{
+	return City_OnPlayerEnterCheckpoint(playerid);
+}
+
+//----------------------------------------------------------
+
+public OnPlayerPickUpPickup(playerid, pickupid)
+{
+	return City_OnPlayerPickUpPickup(playerid, pickupid);
 }
 
 //----------------------------------------------------------
